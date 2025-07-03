@@ -9,7 +9,7 @@
 
 #define usbSerial Serial
 //#define productUID "product:edu.mit.rkovacs:playground" //debugging
-#define productUID "edu.mit.rkovacs:neudeployed" //debugging
+#define productUID "edu.mit.rkovacs:neudeployed"
 #define PCAADDR 0x70
 #define SEN55_CHANNEL 7
 #define SCD41_CHANNEL 4
@@ -66,7 +66,7 @@ void setup() {
   Wire.begin();
 
   notecard.begin();
-  notecard.setDebugOutputStream(usbSerial);
+  notecard.setDebugOutputStream(Serial);
   Serial.println("Start Setup");
 
   // Read Env Vars before sensor setup
@@ -76,7 +76,9 @@ void setup() {
 
   const char* inboundTimeStr = getEnvVar("inboundTime", "60");
   const char* outboundTimeStr = getEnvVar("outboundTime", "60");
-  int inboundTime = atoi(inboundTimeStr);
+  //int inboundTime = 4; // debugging
+  //int outboundTime = 4; //debugging
+  int inboundTime = atoi(inboundTimeStr); 
   int outboundTime = atoi(outboundTimeStr);
   free((void*)inboundTimeStr);
   free((void*)outboundTimeStr);
@@ -93,7 +95,9 @@ void setup() {
   //pcaselect(8);  // Disable PCA before Notecard
   J* req1 = NoteNewRequest("hub.set");
   JAddStringToObject(req1, "product", productUID);
-  JAddStringToObject(req1, "mode", "periodic");
+  //JAddStringToObject(req1, "mode", "periodic");
+  JAddStringToObject(req1, "mode", "continuous");
+
   JAddNumberToObject(req1, "outbound", outboundTime);
   JAddNumberToObject(req1, "inbound", inboundTime);
   JAddNumberToObject(req1, "readingInterval", readingInterval);
@@ -166,7 +170,7 @@ void loop() {
   Serial.println("--Start Fan");
   //warm up for 45 sec
   delay(45000);
-  //delay(10000); // for debugging
+  //delay(1000); // for debugging
 
   Serial.println("--Start Measurement");
 
@@ -277,6 +281,23 @@ void loop() {
     JDelete(verRsp);
   }
 
+ // ------------ check voltage ------------
+
+  double voltage = -1;  // Declare at top so it's available later
+
+  // Initial voltage check
+  J* vreq = notecard.newRequest("card.voltage");
+  if (vreq != NULL) {
+    J* vrsp = notecard.requestAndResponse(vreq);
+    if (vrsp != NULL) {
+      voltage = JGetNumber(vrsp, "value");
+      Serial.print("Battery Voltage: ");
+      Serial.print(voltage);
+      Serial.println(" V");
+
+      notecard.deleteResponse(vrsp);
+    }
+  }
 
   // ---------- Send Data ----------
   //pcaselect(8);  // Deselect PCA before Notecard
@@ -303,6 +324,7 @@ void loop() {
       JAddNumberToObject(body, "inboundTime", inboundTime);
       JAddNumberToObject(body, "outboundTime", outboundTime);
       JAddNumberToObject(body, "readingInterval", readingInterval);
+      JAddNumberToObject(body, "voltage", voltage);
     }
     notecard.sendRequest(req);
   }
@@ -325,9 +347,78 @@ void loop() {
     Serial.println("hub.set updated due to env var change");
   }
 
+
+//3.7/3.85
+  if (voltage < 3.45) {
+    Serial.println("Battery below 30%! Waiting for recharge...");
+
+    J* breq = notecard.newRequest("note.add");
+      if (breq != NULL) {
+        JAddStringToObject(breq, "file", "battery.qo");
+        JAddBoolToObject(breq, "sync", true);
+
+        J* body = JAddObjectToObject(breq, "body");
+        if (body) {
+          JAddNumberToObject(body, "voltage", voltage);
+          JAddStringToObject(body, "BatteryStatus", "Low"); 
+        }
+        notecard.sendRequest(breq);
+      }
+
+    while (voltage < 3.7) {
+      delay(30000);  // Wait before checking again
+
+      // check voltage level
+      J* vreq = notecard.newRequest("card.voltage");
+      if (vreq != NULL) {
+        J* vrsp = notecard.requestAndResponse(vreq);
+        if (vrsp != NULL) {
+          voltage = JGetNumber(vrsp, "value");
+          Serial.print("Battery Voltage: ");
+          Serial.print(voltage);
+          Serial.println(" V");
+          notecard.deleteResponse(vrsp);
+        }
+      }
+
+      //Send card.status with sync to Notehub
+      J* req = notecard.newRequest("note.add");
+      if (req != NULL) {
+        JAddStringToObject(req, "file", "battery.qo");
+
+        J* body = JAddObjectToObject(req, "body");
+        if (body) {
+          JAddNumberToObject(body, "voltage", voltage);
+          JAddStringToObject(body, "BatteryStatus", "Low"); 
+        }
+        notecard.sendRequest(req);
+      }
+      //Serial.print("Current Battery voltage: ");
+      //Serial.print(voltage);
+      //Serial.println("V");
+
+    }
+
+    J* breq2 = notecard.newRequest("note.add");
+      if (breq2 != NULL) {
+        JAddStringToObject(breq2, "file", "battery.qo");
+        JAddBoolToObject(breq2, "sync", true);
+        J* body = JAddObjectToObject(breq2, "body");
+        if (body) {
+          JAddNumberToObject(body, "voltage", voltage);
+          JAddStringToObject(body, "BatteryStatus", "Restored");
+        }
+        notecard.sendRequest(breq2);
+      }
+
+    Serial.println("Battery has reached 60%. Resuming.");
+  }
+
+
+
   Serial.print("Start Delay: ");
   Serial.println(readingInterval * 1000);
-  //delay(100); //debugging
+  //delay(30000); //debugging
   delay(readingInterval * 1000);
   Serial.println("End Delay");
 }

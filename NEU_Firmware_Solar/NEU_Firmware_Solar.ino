@@ -349,7 +349,7 @@ void loop() {
 
 
 //3.7/3.85
-  if (voltage < 3.45) {
+  if (voltage < 3.3) {
     Serial.println("Battery below 30%! Waiting for recharge...");
 
     J* breq = notecard.newRequest("note.add");
@@ -365,7 +365,7 @@ void loop() {
         notecard.sendRequest(breq);
       }
 
-    while (voltage < 3.7) {
+    while (voltage < 3.6) {
       delay(30000);  // Wait before checking again
 
       // check voltage level

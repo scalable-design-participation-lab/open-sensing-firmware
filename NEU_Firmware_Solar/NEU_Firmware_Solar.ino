@@ -283,7 +283,7 @@ void loop() {
 
  // ------------ check voltage ------------
 
-  double voltage = -1;  // Declare at top so it's available later
+  double voltage = -1;  // allocate variable with invalid number to make sure real value is populated
 
   // Initial voltage check
   J* vreq = notecard.newRequest("card.voltage");
@@ -366,7 +366,7 @@ void loop() {
       }
 
     while (voltage < 3.6) {
-      delay(30000);  // Wait before checking again
+      delay(3600000);  // Wait 1hr before checking again
 
       // check voltage level
       J* vreq = notecard.newRequest("card.voltage");
@@ -381,7 +381,7 @@ void loop() {
         }
       }
 
-      //Send card.status with sync to Notehub
+      //Send card.status with sync to Notehub with battery status
       J* req = notecard.newRequest("note.add");
       if (req != NULL) {
         JAddStringToObject(req, "file", "battery.qo");

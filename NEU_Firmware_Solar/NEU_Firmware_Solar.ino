@@ -1,46 +1,57 @@
 //NEU_Weather_Solar
+// Reid Kovacs
+// version 1.0.4
+
+// --------- OPTIONS END ---------
+
+#define ProductUID "PUIDPrefix:PUID" // Fill in this with your details!!
+#define useSCD4x True                // Set to False if not using
+
+// --------- OPTIONS END ---------
 
 #include <Notecard.h>
-// #include <Adafruit_seesaw.h>
 #include <SensirionI2CSen5x.h>
-//#include <SparkFun_SCD4x_Arduino_Library.h>  // SCD4x Library
-#include <SensirionI2cScd4x.h>
- include "Adafruit_LC709203F.h"
-
-
-
+#include <Adafruit_LC709203F.h>
 
 #define usbSerial Serial
-//#define productUID "product:edu.mit.rkovacs:playground" //debugging
-#define productUID "edu.mit.rkovacs:neudeployed"
-#define PCAADDR 0x70
+#define productUID "UIDPrefix:UID"
 #define SEN55_CHANNEL 7
-#define SCD41_CHANNEL 4
 
 static char errorMessage[256]; 
 static int16_t error;
 
 Notecard notecard;
 SensirionI2CSen5x sen5x;
-SensirionI2cScd4x scd4x;
 Adafruit_LC709203F lc;
+
+#if useSCD4x
+  #include <SensirionI2cScd4x.h>
+  #define SCD41_CHANNEL 4 
+  SensirionI2cScd4x scd4x;
+#endif
+
 
 int prevInboundTime = -1;
 int prevOutboundTime = -1;
 
 
-// ------------------------------------------------------------ Function for Environment Variable 
+
+// --------- Function for Environment Variable ---------
 const char* getEnvVar(const char* varName, const char* defaultValue) {
   J* req = notecard.newRequest("env.get");
+
   if (req != NULL) {
     JAddStringToObject(req, "name", varName);
     J* rsp = notecard.requestAndResponse(req);
+
     if (rsp != NULL) {
       const char* value = JGetString(rsp, "text");
+
       if (value != NULL && strlen(value) > 0) {
         String safeCopy = String(value);
         notecard.deleteResponse(rsp);
         char* heapCopy = (char*)malloc(safeCopy.length() + 1);
+
         if (heapCopy) {
           strcpy(heapCopy, safeCopy.c_str());
           return heapCopy;
@@ -52,10 +63,12 @@ const char* getEnvVar(const char* varName, const char* defaultValue) {
   return strdup(defaultValue);
 }
 
-// ------------------------------------------------------------ Void Setup
+
+
+// --------- Void Setup ---------
 void setup() {
 
-  //start setial
+  //start serial
   delay(2000);
   Serial.begin(115200);
   delay(2000);
@@ -99,8 +112,7 @@ void setup() {
   JAddBoolToObject(req1, "sync", true);
   notecard.sendRequest(req1);
 
-//------------------------------- ### SEN55 Setup
-  //pcaselect(2);
+  // --------- SEN55 Setup ---------
   unsigned status;
   sen5x.begin(Wire);
 
@@ -118,22 +130,25 @@ void setup() {
   }
   Serial.println("done - SEN5X");
 
-  //------------------------------- ### SCD41 Setup
-  scd4x.begin(Wire,SCD41_I2C_ADDR_62);
+  // --------- SCD41 Setup ---------
 
-  error = scd4x.wakeUp();
-  error = scd4x.stopPeriodicMeasurement();
-  error = scd4x.reinit();
-  
-  if (error) {
-    Serial.print("Error trying to execute deviceReset(): ");
-    errorToString(error, errorMessage, 256);
-    Serial.println(errorMessage);
-    while(1) {};
-  }
-  Serial.println("done - SCD4x");
+  #if useSCD4x
+    scd4x.begin(Wire,SCD41_I2C_ADDR_62);
 
-  //------------------------------- ### SCD41 Setup
+    error = scd4x.wakeUp();
+    error = scd4x.stopPeriodicMeasurement();
+    error = scd4x.reinit();
+    
+    if (error) {
+      Serial.print("Error trying to execute deviceReset(): ");
+      errorToString(error, errorMessage, 256);
+      Serial.println(errorMessage);
+      while(1) {};
+    }
+    Serial.println("done - SCD4x");
+  #endif
+
+  // --------- LC709203F Setup ---------
   if (!lc.begin()) {
     Serial.println(F("Couldnt find LC709203F?\nMake sure a battery is connected!"));
     while (1) delay(10);
@@ -143,12 +158,13 @@ void setup() {
 
   lc.setPackSize(LC709203F_APA_3000MAH);
 
-  // lc.setAlarmVoltage(3.8);
   Serial.println("done - LC7092034F");
-  
+
+  // --------- Setup END ---------
   Serial.println("End Setup");
 
-  //------------------------------- ## Send note indicating power-on
+
+  // ---------Send note indicating power-on ---------
   J *req = notecard.newRequest("note.add");
   if (req != NULL)
   {
@@ -161,10 +177,12 @@ void setup() {
     }
     notecard.sendRequest(req);
   }
+
+
 }
 
 
-// ------------------------------------------------------------ Main Loop
+//  --------- Main Loop  ---------
 
 void loop() {
   // uint16_t error;
@@ -223,35 +241,41 @@ void loop() {
     Serial.print("NOx Index: ");
     Serial.println(noxIndex);
   }
+  // --------- LC709203F  ---------
 
- //-------------------------------  SCD4x
-  Serial.println("Begin SCD4x Reading");
+  float battery_voltage = lc.cellVoltage();
+  float battery_percent = lc.cellPercent();
+  float battery_temp = lc.getCellTemperature();
+
+  // --------- SCD4x  ---------
 
   uint16_t scdCO2 = 0;
   float    scdTemp = 0.0;
   float    scdHumidity = 0.0;
 
-  Serial.println("--Start Measurement");
-  error = scd4x.wakeUp();
-  error = scd4x.measureSingleShot(); // ignore first reading after wakeup
-  error = scd4x.measureAndReadSingleShot(scdCO2, 
-                                          scdTemp, 
-                                          scdHumidity);
+  #if useSCD4x
+    Serial.println("Begin SCD4x Reading");
 
-  if (error) {
-      Serial.print("Error trying to execute measureAndReadSingleShot(): ");
-      errorToString(error, errorMessage, sizeof errorMessage);
-      Serial.println(errorMessage);
-      return;
-  }
-  Serial.println("--Measurement complete");
+    Serial.println("--Start Measurement");
+    error = scd4x.wakeUp();
+    error = scd4x.measureSingleShot(); // ignore first reading after wakeup
+    error = scd4x.measureAndReadSingleShot(scdCO2, 
+                                            scdTemp, 
+                                            scdHumidity);
 
-  // ---------- Timestamp, Latitude, Longitude ----------
-  //pcaselect(8);  // Deselect PCA before Notecard
+    if (error) {
+        Serial.print("Error trying to execute measureAndReadSingleShot(): ");
+        errorToString(error, errorMessage, sizeof errorMessage);
+        Serial.println(errorMessage);
+        return;
+    }
+    Serial.println("--Measurement complete");
+  #endif
+
+  //  --------- Timestamp, Latitude, Longitude ----------
   long timestamp = -1;
   double lat = 0.0, lon = 0.0;
 
-  //pcaselect(8);  // Deselect PCA before Notecard
   J* timeReq = notecard.newRequest("card.time");
   J* timeRsp = notecard.requestAndResponse(timeReq);
   if (timeRsp != NULL) {
@@ -278,7 +302,6 @@ void loop() {
 
   char deviceUID[64] = "unknown";
 
-  //pcaselect(8);  // Deselect PCA before Notecard
   J* verReq = notecard.newRequest("card.version");
   J* verRsp = notecard.requestAndResponse(verReq);
   if (verRsp != NULL) {
@@ -308,7 +331,6 @@ void loop() {
   }
 
   // ---------- Send Data ----------
-  //pcaselect(8);  // Deselect PCA before Notecard
   J* req = notecard.newRequest("note.add");
   if (req) {
     JAddStringToObject(req, "file", "sensors.qo");
@@ -333,6 +355,9 @@ void loop() {
       JAddNumberToObject(body, "outboundTime", outboundTime);
       JAddNumberToObject(body, "readingInterval", readingInterval);
       JAddNumberToObject(body, "voltage", voltage);
+      JAddNumberToObject(body, "fuelgauge_voltage", battery_voltage);
+      JAddNumberToObject(body, "fuelgauge_percent", battery_percent);
+      JAddNumberToObject(body, "fuelgauge_celltemp", battery_temp); 
     }
     notecard.sendRequest(req);
   }
@@ -342,7 +367,6 @@ void loop() {
     prevInboundTime = inboundTime;
     prevOutboundTime = outboundTime;
 
-    //pcaselect(8);  // Deselect PCA before Notecard
     J* hubReq = NoteNewRequest("hub.set");
     JAddStringToObject(hubReq, "product", productUID);
     JAddStringToObject(hubReq, "mode", "periodic");

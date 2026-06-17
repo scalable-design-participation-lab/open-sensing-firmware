@@ -48,6 +48,7 @@
 
 static char errorMessage[256];
 static int16_t error;
+static int16_t scd_error;
 
 Notecard notecard;
 SensirionI2CSen5x sen5x;
@@ -240,12 +241,12 @@ void setup() {
   // ---- SCD41 ----
 #if useSCD4x
   scd4x.begin(Wire, SCD41_I2C_ADDR_62);
-  error = scd4x.wakeUp();
-  error = scd4x.stopPeriodicMeasurement();
-  error = scd4x.reinit();
-  if (error) {
+  scd_error = scd4x.wakeUp();
+  scd_error = scd4x.stopPeriodicMeasurement();
+  scd_error = scd4x.reinit();
+  if (scd_error) {
     Serial.print("SCD4x init error: ");
-    errorToString(error, errorMessage, 256);
+    errorToString(scd_error, errorMessage, 256);
     Serial.println(errorMessage);
     while (1) {};
   }
@@ -301,7 +302,7 @@ void loop() {
   sen5x.startMeasurement();
 
   #if useSCD4x    
-    error = scd4x.wakeUp(); // start scd4x now to share warm up period with SEN55.
+    scd_error = scd4x.wakeUp(); // start scd4x now to share warm up period with SEN55.
   #endif
 
   delay(45000);                         // 45s fan warm-up.
@@ -325,11 +326,11 @@ void loop() {
   float scdTemp = 0.0, scdHumidity = 0.0;
 #if useSCD4x
   Serial.println("SCD4x: measure");
-  error = scd4x.measureSingleShot();                 // discard first reading after wake
-  error = scd4x.measureAndReadSingleShot(scdCO2, scdTemp, scdHumidity);
-  if (error) {
+  scd_error = scd4x.measureSingleShot();                 // discard first reading after wake
+  scd_error = scd4x.measureAndReadSingleShot(scdCO2, scdTemp, scdHumidity);
+  if (scd_error) {
     Serial.print("SCD4x measureAndReadSingleShot() error: ");
-    errorToString(error, errorMessage, sizeof errorMessage);
+    errorToString(scd_error, errorMessage, sizeof errorMessage);
     Serial.println(errorMessage);
   }
   scd4x.powerDown();                                 // back to sleep until next cycle

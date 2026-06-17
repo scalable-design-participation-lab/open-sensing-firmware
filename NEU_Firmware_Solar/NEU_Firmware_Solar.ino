@@ -1,10 +1,13 @@
 //NEU_Weather_Solar
 
 #include <Notecard.h>
-#include <Adafruit_seesaw.h>
+// #include <Adafruit_seesaw.h>
 #include <SensirionI2CSen5x.h>
 //#include <SparkFun_SCD4x_Arduino_Library.h>  // SCD4x Library
 #include <SensirionI2cScd4x.h>
+ include "Adafruit_LC709203F.h"
+
+
 
 
 #define usbSerial Serial
@@ -20,21 +23,14 @@ static int16_t error;
 Notecard notecard;
 SensirionI2CSen5x sen5x;
 SensirionI2cScd4x scd4x;
+Adafruit_LC709203F lc;
 
 int prevInboundTime = -1;
 int prevOutboundTime = -1;
 
-// ------------------------------------------------------------ PCA9548A MUX Channel Select 
-void pcaselect(uint8_t channel) {
-  Wire.beginTransmission(PCAADDR);
-  Wire.write(channel > 7 ? 0x00 : (1 << channel));  // 0x00 disables all channels
-  Wire.endTransmission();
-  delay(5);
-}
 
 // ------------------------------------------------------------ Function for Environment Variable 
 const char* getEnvVar(const char* varName, const char* defaultValue) {
-  //pcaselect(8);  // Deselect PCA before Notecard I2C access
   J* req = notecard.newRequest("env.get");
   if (req != NULL) {
     JAddStringToObject(req, "name", varName);
@@ -92,7 +88,6 @@ void setup() {
   JAddBoolToObject(dfu, "on", true);
   notecard.sendRequest(dfu);
 
-  //pcaselect(8);  // Disable PCA before Notecard
   J* req1 = NoteNewRequest("hub.set");
   JAddStringToObject(req1, "product", productUID);
   //JAddStringToObject(req1, "mode", "periodic");
@@ -123,7 +118,7 @@ void setup() {
   }
   Serial.println("done - SEN5X");
 
-  //------------------------------- ### SEN4x Setup
+  //------------------------------- ### SCD41 Setup
   scd4x.begin(Wire,SCD41_I2C_ADDR_62);
 
   error = scd4x.wakeUp();
@@ -138,6 +133,19 @@ void setup() {
   }
   Serial.println("done - SCD4x");
 
+  //------------------------------- ### SCD41 Setup
+  if (!lc.begin()) {
+    Serial.println(F("Couldnt find LC709203F?\nMake sure a battery is connected!"));
+    while (1) delay(10);
+  }
+  Serial.println(F("Found LC709203F"));
+  Serial.print("Version: 0x"); Serial.println(lc.getICversion(), HEX);
+
+  lc.setPackSize(LC709203F_APA_3000MAH);
+
+  // lc.setAlarmVoltage(3.8);
+  Serial.println("done - LC7092034F");
+  
   Serial.println("End Setup");
 
   //------------------------------- ## Send note indicating power-on

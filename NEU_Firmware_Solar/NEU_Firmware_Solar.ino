@@ -1,11 +1,11 @@
 //NEU_Weather_Solar
 // Reid Kovacs
-// version 1.0.4
+// version 1.0.5
 
-// --------- OPTIONS END ---------
+// --------- OPTIONS ---------
 
 #define ProductUID "PUIDPrefix:PUID" // Fill in this with your details!!
-#define useSCD4x True                // Set to False if not using
+#define useSCD4x 1                   // Set to 0 if not using
 
 // --------- OPTIONS END ---------
 
@@ -14,10 +14,8 @@
 #include <Adafruit_LC709203F.h>
 
 #define usbSerial Serial
-#define productUID "UIDPrefix:UID"
-#define SEN55_CHANNEL 7
 
-static char errorMessage[256]; 
+static char errorMessage[256];
 static int16_t error;
 
 Notecard notecard;
@@ -26,49 +24,40 @@ Adafruit_LC709203F lc;
 
 #if useSCD4x
   #include <SensirionI2cScd4x.h>
-  #define SCD41_CHANNEL 4 
   SensirionI2cScd4x scd4x;
 #endif
-
 
 int prevInboundTime = -1;
 int prevOutboundTime = -1;
 
 
-
 // --------- Function for Environment Variable ---------
+// Returns a heap-allocated string the caller must free().
 const char* getEnvVar(const char* varName, const char* defaultValue) {
-  J* req = notecard.newRequest("env.get");
+  char* result = NULL;
 
+  J* req = notecard.newRequest("env.get");
   if (req != NULL) {
     JAddStringToObject(req, "name", varName);
     J* rsp = notecard.requestAndResponse(req);
 
     if (rsp != NULL) {
       const char* value = JGetString(rsp, "text");
-
       if (value != NULL && strlen(value) > 0) {
-        String safeCopy = String(value);
-        notecard.deleteResponse(rsp);
-        char* heapCopy = (char*)malloc(safeCopy.length() + 1);
-
-        if (heapCopy) {
-          strcpy(heapCopy, safeCopy.c_str());
-          return heapCopy;
-        }
+        result = strdup(value);          // copy before freeing the response
       }
-      notecard.deleteResponse(rsp);
+      notecard.deleteResponse(rsp);      // single delete on every path
     }
   }
-  return strdup(defaultValue);
-}
 
+  return result ? result : strdup(defaultValue);
+}
 
 
 // --------- Void Setup ---------
 void setup() {
 
-  //start serial
+  // start serial
   delay(2000);
   Serial.begin(115200);
   delay(2000);
@@ -83,16 +72,14 @@ void setup() {
   int readingInterval = atoi(intervalStr);
   free((void*)intervalStr);
 
-  const char* inboundTimeStr = getEnvVar("inboundTime", "60");
+  const char* inboundTimeStr  = getEnvVar("inboundTime", "60");
   const char* outboundTimeStr = getEnvVar("outboundTime", "60");
-  //int inboundTime = 4; // debugging
-  //int outboundTime = 4; //debugging
-  int inboundTime = atoi(inboundTimeStr); 
+  int inboundTime  = atoi(inboundTimeStr);
   int outboundTime = atoi(outboundTimeStr);
   free((void*)inboundTimeStr);
   free((void*)outboundTimeStr);
 
-  prevInboundTime = inboundTime;
+  prevInboundTime  = inboundTime;
   prevOutboundTime = outboundTime;
 
   // Enable DFU for STM32
@@ -102,18 +89,15 @@ void setup() {
   notecard.sendRequest(dfu);
 
   J* req1 = NoteNewRequest("hub.set");
-  JAddStringToObject(req1, "product", productUID);
+  JAddStringToObject(req1, "product", ProductUID);
   //JAddStringToObject(req1, "mode", "periodic");
   JAddStringToObject(req1, "mode", "continuous");
-
-  JAddNumberToObject(req1, "outbound", outboundTime);
-  JAddNumberToObject(req1, "inbound", inboundTime);
-  JAddNumberToObject(req1, "readingInterval", readingInterval);
+  JAddNumberToObject(req1, "outbound", outboundTime);   // minutes
+  JAddNumberToObject(req1, "inbound", inboundTime);      // minutes
   JAddBoolToObject(req1, "sync", true);
   notecard.sendRequest(req1);
 
   // --------- SEN55 Setup ---------
-  unsigned status;
   sen5x.begin(Wire);
 
   unsigned char productName[32];
@@ -123,27 +107,26 @@ void setup() {
   error = sen5x.deviceReset();
 
   if (error) {
-    Serial.print("Error trying to execute deviceReset(): ");
+    Serial.print("SEN55 deviceReset() error: ");
     errorToString(error, errorMessage, 256);
     Serial.println(errorMessage);
-    while(1) {};
+    while (1) {};
   }
   Serial.println("done - SEN5X");
 
   // --------- SCD41 Setup ---------
-
   #if useSCD4x
-    scd4x.begin(Wire,SCD41_I2C_ADDR_62);
+    scd4x.begin(Wire, SCD41_I2C_ADDR_62);
 
     error = scd4x.wakeUp();
     error = scd4x.stopPeriodicMeasurement();
     error = scd4x.reinit();
-    
+
     if (error) {
-      Serial.print("Error trying to execute deviceReset(): ");
+      Serial.print("SCD4x init error: ");
       errorToString(error, errorMessage, 256);
       Serial.println(errorMessage);
-      while(1) {};
+      while (1) {};
     }
     Serial.println("done - SCD4x");
   #endif
@@ -156,29 +139,23 @@ void setup() {
   Serial.println(F("Found LC709203F"));
   Serial.print("Version: 0x"); Serial.println(lc.getICversion(), HEX);
 
-  lc.setPackSize(LC709203F_APA_3000MAH);
-
-  Serial.println("done - LC7092034F");
+  lc.setPackSize(LC709203F_APA_3000MAH);  
+  Serial.println("done - LC709203F");
 
   // --------- Setup END ---------
   Serial.println("End Setup");
 
-
-  // ---------Send note indicating power-on ---------
-  J *req = notecard.newRequest("note.add");
-  if (req != NULL)
-  {
+  // --------- Send note indicating power-on ---------
+  J* req = notecard.newRequest("note.add");
+  if (req != NULL) {
     JAddStringToObject(req, "file", "sensors.qo");
     JAddBoolToObject(req, "sync", true); // force sync
-    J *body = JAddObjectToObject(req, "body");
-    if (body)
-    {
+    J* body = JAddObjectToObject(req, "body");
+    if (body) {
       JAddNumberToObject(body, "PowerOn", 1);
     }
     notecard.sendRequest(req);
   }
-
-
 }
 
 
@@ -187,6 +164,75 @@ void setup() {
 void loop() {
   // uint16_t error;
   // char errorMessage[256];
+  
+  // --------- LC709203F  ---------
+
+  float battery_voltage = lc.cellVoltage();
+  float battery_percent = lc.cellPercent();
+  float battery_temp = lc.getCellTemperature();
+
+  // --------- Battery Level Management ---------
+  if (battery_percent < 20) {
+    Serial.println("Battery below 20%! Waiting for recharge...");
+
+    J* breq = notecard.newRequest("note.add");
+      if (breq != NULL) {
+        JAddStringToObject(breq, "file", "battery.qo");
+        JAddBoolToObject(breq, "sync", true);
+
+        J* body = JAddObjectToObject(breq, "body");
+        if (body) {
+          JAddNumberToObject(body, "Battery Voltage", battery_voltage);
+          JAddNumberToObject(body, "Battery Percent", battery_percent);
+          JAddStringToObject(body, "BatteryStatus", "Low"); 
+        }
+        notecard.sendRequest(breq);
+      }
+
+    while (battery_percent < 30) {
+      delay(3600000);  // Wait 1hr before checking again
+      battery_voltage = lc.cellVoltage();
+      battery_percent = lc.cellPercent();
+
+      Serial.print("Battery Percent: ");
+      Serial.print(battery_percent);
+      Serial.println(" V");
+
+      //Send card.status with sync to Notehub with battery status
+      J* req = notecard.newRequest("note.add");
+      if (req != NULL) {
+        JAddStringToObject(req, "file", "battery.qo");
+
+        J* body = JAddObjectToObject(req, "body");
+        if (body) {
+          JAddNumberToObject(body, "Battery Voltage", battery_voltage);
+          JAddNumberToObject(body, "Battery Percent", battery_percent);
+          JAddStringToObject(body, "BatteryStatus", "Low"); 
+        }
+        notecard.sendRequest(req);
+      }
+      //Serial.print("Current Battery voltage: ");
+      //Serial.print(voltage);
+      //Serial.println("V");
+
+    }
+
+    J* breq2 = notecard.newRequest("note.add");
+      if (breq2 != NULL) {
+        JAddStringToObject(breq2, "file", "battery.qo");
+        JAddBoolToObject(breq2, "sync", true);
+        J* body = JAddObjectToObject(breq2, "body");
+        if (body) {
+          JAddNumberToObject(body, "Battery Voltage", battery_voltage);
+          JAddNumberToObject(body, "Battery Percent", battery_percent);
+          JAddStringToObject(body, "BatteryStatus", "Restored");
+        }
+        notecard.sendRequest(breq2);
+      }
+
+    Serial.println("Battery has reached 30%. Resuming.");
+  }
+
 
   // ---------- Read SEN55 ----------
   Serial.println("Begin SEN55 Reading");
@@ -241,11 +287,7 @@ void loop() {
     Serial.print("NOx Index: ");
     Serial.println(noxIndex);
   }
-  // --------- LC709203F  ---------
 
-  float battery_voltage = lc.cellVoltage();
-  float battery_percent = lc.cellPercent();
-  float battery_temp = lc.getCellTemperature();
 
   // --------- SCD4x  ---------
 
@@ -267,7 +309,6 @@ void loop() {
         Serial.print("Error trying to execute measureAndReadSingleShot(): ");
         errorToString(error, errorMessage, sizeof errorMessage);
         Serial.println(errorMessage);
-        return;
     }
     Serial.println("--Measurement complete");
   #endif
@@ -368,7 +409,7 @@ void loop() {
     prevOutboundTime = outboundTime;
 
     J* hubReq = NoteNewRequest("hub.set");
-    JAddStringToObject(hubReq, "product", productUID);
+    JAddStringToObject(hubReq, "product", ProductUID);
     JAddStringToObject(hubReq, "mode", "periodic");
     JAddNumberToObject(hubReq, "outbound", outboundTime);
     JAddNumberToObject(hubReq, "inbound", inboundTime);
@@ -379,72 +420,6 @@ void loop() {
     Serial.println("hub.set updated due to env var change");
   }
 
-
-//3.7/3.85
-  if (voltage < 3.3) {
-    Serial.println("Battery below 30%! Waiting for recharge...");
-
-    J* breq = notecard.newRequest("note.add");
-      if (breq != NULL) {
-        JAddStringToObject(breq, "file", "battery.qo");
-        JAddBoolToObject(breq, "sync", true);
-
-        J* body = JAddObjectToObject(breq, "body");
-        if (body) {
-          JAddNumberToObject(body, "voltage", voltage);
-          JAddStringToObject(body, "BatteryStatus", "Low"); 
-        }
-        notecard.sendRequest(breq);
-      }
-
-    while (voltage < 3.6) {
-      delay(3600000);  // Wait 1hr before checking again
-
-      // check voltage level
-      J* vreq = notecard.newRequest("card.voltage");
-      if (vreq != NULL) {
-        J* vrsp = notecard.requestAndResponse(vreq);
-        if (vrsp != NULL) {
-          voltage = JGetNumber(vrsp, "value");
-          Serial.print("Battery Voltage: ");
-          Serial.print(voltage);
-          Serial.println(" V");
-          notecard.deleteResponse(vrsp);
-        }
-      }
-
-      //Send card.status with sync to Notehub with battery status
-      J* req = notecard.newRequest("note.add");
-      if (req != NULL) {
-        JAddStringToObject(req, "file", "battery.qo");
-
-        J* body = JAddObjectToObject(req, "body");
-        if (body) {
-          JAddNumberToObject(body, "voltage", voltage);
-          JAddStringToObject(body, "BatteryStatus", "Low"); 
-        }
-        notecard.sendRequest(req);
-      }
-      //Serial.print("Current Battery voltage: ");
-      //Serial.print(voltage);
-      //Serial.println("V");
-
-    }
-
-    J* breq2 = notecard.newRequest("note.add");
-      if (breq2 != NULL) {
-        JAddStringToObject(breq2, "file", "battery.qo");
-        JAddBoolToObject(breq2, "sync", true);
-        J* body = JAddObjectToObject(breq2, "body");
-        if (body) {
-          JAddNumberToObject(body, "voltage", voltage);
-          JAddStringToObject(body, "BatteryStatus", "Restored");
-        }
-        notecard.sendRequest(breq2);
-      }
-
-    Serial.println("Battery has reached 60%. Resuming.");
-  }
 
 
 
